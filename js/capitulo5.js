@@ -705,11 +705,11 @@ const questions = [
     }
 ];
 
-// El resto del código (variables globales, funciones, etc.) se mantiene igual
 // ============================================
 // VARIABLES GLOBALES
 // ============================================
 let currentQuestionIndex = 0;
+let currentLevel = 'facil';
 let shuffledQuestions = [];
 let correctCount = 0;
 let incorrectCount = 0;
@@ -717,7 +717,22 @@ let answered = false;
 let selectedOption = null;
 let selectedFillOption = null;
 
-// Elementos del DOM
+const chapters = [
+    { number: 1, title: 'La Iglesia Cristiana a Través de las Edades' },
+    { number: 2, title: 'Heraldos del Mensaje del Advenimiento' },
+    { number: 3, title: 'Surge la Iglesia Remanente' },
+    { number: 4, title: 'Se Organiza la Iglesia Remanente' },
+    { number: 5, title: 'Expansión y Reforma' },
+    { number: 6, title: 'Visión Mundial' },
+    { number: 7, title: 'Progresos y Pérdidas' },
+    { number: 8, title: 'Continúa la Expansión de las Misiones' },
+    { number: 9, title: 'Progreso a pesar de los Reveses' },
+    { number: 10, title: 'Confirmación y Expansión' },
+    { number: 11, title: 'La Terminación de la Comisión Evangélica' },
+    { number: 12, title: 'Los Departamentos de la Iglesia' },
+    { number: 13, title: 'Divisiones Mundiales de la Iglesia' }
+];
+
 const domElements = {
     questionCounter: document.getElementById('questionCounter'),
     questionText: document.getElementById('questionText'),
@@ -732,7 +747,8 @@ const domElements = {
     submitBtn: document.getElementById('submitBtn'),
     nextBtn: document.getElementById('nextBtn'),
     resultMessage: document.getElementById('resultMessage'),
-    chapterTitle: document.getElementById('chapterTitle')
+    chapterTitle: document.getElementById('chapterTitle'),
+    chapterSelector: document.getElementById('chapterSelector')
 };
 
 // ============================================
@@ -753,45 +769,121 @@ function backToMenu() {
 function updateScoreDisplay() {
     if (domElements.correctCount) domElements.correctCount.textContent = correctCount;
     if (domElements.incorrectCount) domElements.incorrectCount.textContent = incorrectCount;
+    updateMenuStats();
 }
 
 // ============================================
-// FUNCIÓN PRINCIPAL DE CARGA DE PREGUNTA
+// SELECTOR DE CAPÍTULOS
 // ============================================
-function loadQuestion() {
-    const question = shuffledQuestions[currentQuestionIndex];
+function loadChapterSelector() {
+    const selector = domElements.chapterSelector;
+    if (!selector) return;
     
-    domElements.questionCounter.textContent = `Pregunta ${currentQuestionIndex + 1}/${shuffledQuestions.length}`;
-    domElements.questionText.textContent = question.question;
+    selector.innerHTML = '';
+    const currentChapter = parseInt(localStorage.getItem('historiaDenominacional_currentChapter') || '5');
+    const completedChapters = JSON.parse(localStorage.getItem('historiaDenominacional_progress') || '[]');
     
-    const progress = ((currentQuestionIndex + 1) / shuffledQuestions.length) * 100;
-    domElements.progressFill.style.width = `${progress}%`;
-    domElements.progressText.textContent = `Progreso: ${currentQuestionIndex + 1} de ${shuffledQuestions.length}`;
+    chapters.forEach(chapter => {
+        const option = document.createElement('option');
+        option.value = chapter.number;
+        const isCompleted = completedChapters.includes(chapter.number);
+        option.textContent = `Capítulo ${chapter.number}: ${chapter.title.substring(0, 20)}... ${isCompleted ? '✓ COMPLETADO' : ''}`;
+        if (chapter.number === currentChapter) {
+            option.selected = true;
+        }
+        selector.appendChild(option);
+    });
     
-    domElements.multipleChoiceContainer.classList.add('hidden');
-    domElements.fillBlankContainer.classList.add('hidden');
-    domElements.finalResults.classList.add('hidden');
+    selector.addEventListener('change', function() {
+        const newChapter = parseInt(this.value);
+        if (newChapter !== currentChapter) {
+            if (confirm('¿Cambiar de capítulo? Se perderá tu progreso actual.')) {
+                localStorage.setItem('historiaDenominacional_currentChapter', newChapter);
+                window.location.href = `../libros/capitulo${newChapter}.html`;
+            } else {
+                this.value = currentChapter;
+            }
+        }
+    });
+}
+
+// ============================================
+// CARGAR CAPÍTULOS EN EL MENÚ LATERAL
+// ============================================
+function loadChaptersMenu() {
+    const chaptersGrid = document.getElementById('chaptersGrid');
+    if (!chaptersGrid) return;
     
-    domElements.multipleChoiceContainer.innerHTML = '';
-    domElements.fillBlankContainer.innerHTML = '';
+    chaptersGrid.innerHTML = '';
+    const currentChapter = parseInt(localStorage.getItem('historiaDenominacional_currentChapter') || '5');
+    const completedChapters = JSON.parse(localStorage.getItem('historiaDenominacional_progress') || '[]');
     
-    answered = false;
-    domElements.submitBtn.disabled = false;
-    domElements.resultMessage.classList.add('hidden');
-    domElements.nextBtn.classList.add('hidden');
-    
-    selectedOption = null;
-    selectedFillOption = null;
-    
-    if (question.type === 'multiple') {
-        domElements.questionType.textContent = 'Selección Simple';
-        domElements.multipleChoiceContainer.classList.remove('hidden');
-        loadMultipleChoice(question);
-    } else if (question.type === 'fill') {
-        domElements.questionType.textContent = 'Completación';
-        domElements.fillBlankContainer.classList.remove('hidden');
-        loadFillInTheBlank(question);
+    chapters.forEach(chapter => {
+        const button = document.createElement('button');
+        button.className = 'chapter-btn';
+        if (chapter.number === currentChapter) {
+            button.classList.add('active');
+        }
+        if (completedChapters.includes(chapter.number)) {
+            button.classList.add('completed');
+            button.innerHTML = `${chapter.number} ✓`;
+        } else {
+            button.textContent = chapter.number;
+        }
+        button.onclick = () => goToChapter(chapter.number);
+        chaptersGrid.appendChild(button);
+    });
+}
+
+// ============================================
+// FUNCIÓN PARA CAMBIAR DE CAPÍTULO
+// ============================================
+function goToChapter(chapterNumber) {
+    const currentChapter = parseInt(localStorage.getItem('historiaDenominacional_currentChapter') || '5');
+    if (chapterNumber === currentChapter) {
+        toggleMenu();
+        return;
     }
+    
+    if (confirm(`¿Ir al capítulo ${chapterNumber}? Se perderá tu progreso actual.`)) {
+        localStorage.setItem('historiaDenominacional_currentChapter', chapterNumber);
+        window.location.href = `../libros/capitulo${chapterNumber}.html`;
+    }
+}
+
+// ============================================
+// CAMBIAR NIVEL
+// ============================================
+function changeLevel(level) {
+    if (level === currentLevel) return;
+    
+    if (confirm(`¿Cambiar a nivel ${level}? Se reiniciará tu progreso actual.`)) {
+        currentLevel = level;
+        localStorage.setItem('historiaDenominacional_level', level);
+        
+        const allLevelBtns = document.querySelectorAll('.level-btn');
+        allLevelBtns.forEach(btn => {
+            if (btn.dataset.level === level) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+        
+        const chapterNumber = localStorage.getItem('historiaDenominacional_currentChapter') || '5';
+        if (domElements.chapterTitle) {
+            domElements.chapterTitle.textContent = `Capítulo ${chapterNumber}: Expansión y Reforma - Nivel ${level}`;
+        }
+        
+        restartChapter();
+    }
+}
+
+// ============================================
+// FILTRAR PREGUNTAS POR NIVEL
+// ============================================
+function filterQuestionsByLevel(level) {
+    return questions.filter(q => q.level === level);
 }
 
 // ============================================
@@ -799,6 +891,10 @@ function loadQuestion() {
 // ============================================
 function loadMultipleChoice(question) {
     const container = domElements.multipleChoiceContainer;
+    
+    container.innerHTML = '';
+    container.classList.remove('hidden');
+    
     const letters = ['A', 'B', 'C', 'D'];
     
     question.options.forEach((option, index) => {
@@ -826,17 +922,13 @@ function selectOption(index) {
 function loadFillInTheBlank(question) {
     const container = domElements.fillBlankContainer;
     
-    while (container.firstChild) {
-        container.removeChild(container.firstChild);
-    }
+    container.innerHTML = '';
+    container.classList.remove('hidden');
     
     const allOptions = generateFillOptions(question);
     
     const fillOptionsDiv = document.createElement('div');
     fillOptionsDiv.className = 'fill-options';
-    fillOptionsDiv.id = 'fillOptions';
-    
-    container.appendChild(fillOptionsDiv);
     
     allOptions.forEach((option) => {
         const button = document.createElement('button');
@@ -845,6 +937,8 @@ function loadFillInTheBlank(question) {
         button.onclick = () => selectFillOption(button, option);
         fillOptionsDiv.appendChild(button);
     });
+    
+    container.appendChild(fillOptionsDiv);
 }
 
 function generateFillOptions(question) {
@@ -886,7 +980,41 @@ function selectFillOption(button, selectedValue) {
 }
 
 // ============================================
-// FUNCIÓN PRINCIPAL DE RESPUESTA
+// CARGA DE PREGUNTA
+// ============================================
+function loadQuestion() {
+    const question = shuffledQuestions[currentQuestionIndex];
+    
+    domElements.questionCounter.textContent = `Pregunta ${currentQuestionIndex + 1}/${shuffledQuestions.length}`;
+    domElements.questionText.textContent = question.question;
+    
+    const progress = ((currentQuestionIndex + 1) / shuffledQuestions.length) * 100;
+    domElements.progressFill.style.width = `${progress}%`;
+    domElements.progressText.textContent = `Progreso: ${currentQuestionIndex + 1}/${shuffledQuestions.length}`;
+    
+    domElements.multipleChoiceContainer.classList.add('hidden');
+    domElements.fillBlankContainer.classList.add('hidden');
+    domElements.finalResults.classList.add('hidden');
+    
+    answered = false;
+    domElements.submitBtn.disabled = false;
+    domElements.resultMessage.classList.add('hidden');
+    domElements.nextBtn.classList.add('hidden');
+    
+    selectedOption = null;
+    selectedFillOption = null;
+    
+    if (question.type === 'multiple') {
+        domElements.questionType.textContent = 'Selección Simple';
+        loadMultipleChoice(question);
+    } else if (question.type === 'fill') {
+        domElements.questionType.textContent = 'Completación';
+        loadFillInTheBlank(question);
+    }
+}
+
+// ============================================
+// RESPUESTA
 // ============================================
 function submitAnswer() {
     if (answered) return;
@@ -980,6 +1108,20 @@ function showFinalResults() {
     const percentage = Math.round((correctCount / total) * 100) || 0;
     
     let message = '';
+    let levelMessage = '';
+    
+    switch(currentLevel) {
+        case 'facil':
+            levelMessage = 'Nivel Fácil completado. ¡Sigue practicando!';
+            break;
+        case 'medio':
+            levelMessage = 'Nivel Medio superado. ¡Muy bien!';
+            break;
+        case 'dificil':
+            levelMessage = 'Nivel Difícil dominado. ¡Eres un experto!';
+            break;
+    }
+    
     if (percentage >= 90) message = '¡Excelente! Conoces bien la expansión y reforma de la iglesia.';
     else if (percentage >= 70) message = '¡Muy bien! Tienes un buen conocimiento.';
     else if (percentage >= 50) message = 'Bien, pero puedes repasar algunos conceptos.';
@@ -988,6 +1130,7 @@ function showFinalResults() {
     domElements.finalResults.innerHTML = `
         <div class="final-results-content">
             <h2>🎉 ¡CAPÍTULO 5 COMPLETADO! 🎉</h2>
+            <div class="level-badge">${levelMessage}</div>
             <div class="final-stats">
                 <div class="final-stat-item">
                     <div class="final-stat-value correct">${correctCount}</div>
@@ -1002,20 +1145,36 @@ function showFinalResults() {
             <div class="final-message">"${message}"</div>
             <div class="final-buttons">
                 <button class="final-btn" onclick="backToMenu()">📚 Volver al Menú</button>
-                <button class="final-btn" onclick="restartChapter()">🔄 Repetir Capítulo</button>
+                <button class="final-btn" onclick="restartChapter()">🔄 Repetir Nivel</button>
+                <button class="final-btn" onclick="changeLevelPrompt()">🎮 Cambiar Nivel</button>
             </div>
         </div>
     `;
     
     domElements.finalResults.classList.remove('hidden');
     
-    const chapterNumber = localStorage.getItem('historiaDenominacional_currentChapter') || '5';
-    completeChapter(parseInt(chapterNumber));
+    const chapterNumber = parseInt(localStorage.getItem('historiaDenominacional_currentChapter') || '5');
+    completeChapter(chapterNumber);
+    
+    loadChapterSelector();
+    loadChaptersMenu();
 }
 
+function changeLevelPrompt() {
+    const newLevel = prompt('Selecciona nivel: facil, medio, dificil');
+    if (newLevel && ['facil', 'medio', 'dificil'].includes(newLevel)) {
+        changeLevel(newLevel);
+    }
+}
+
+// ============================================
+// REINICIAR CAPÍTULO
+// ============================================
 function restartChapter() {
+    const levelQuestions = filterQuestionsByLevel(currentLevel);
+    shuffledQuestions = shuffleArray([...levelQuestions]);
+    
     currentQuestionIndex = 0;
-    shuffledQuestions = shuffleArray([...questions]);
     correctCount = 0;
     incorrectCount = 0;
     
@@ -1023,9 +1182,16 @@ function restartChapter() {
     domElements.finalResults.classList.add('hidden');
     domElements.submitBtn.classList.remove('hidden');
     
+    const totalQuestions = shuffledQuestions.length;
+    domElements.questionCounter.textContent = `Pregunta 1/${totalQuestions}`;
+    domElements.progressText.textContent = `Progreso: 0/${totalQuestions}`;
+    
     loadQuestion();
 }
 
+// ============================================
+// COMPLETAR CAPÍTULO
+// ============================================
 function completeChapter(chapterNumber) {
     try {
         const progress = JSON.parse(localStorage.getItem('historiaDenominacional_progress') || '[]');
@@ -1039,28 +1205,121 @@ function completeChapter(chapterNumber) {
 }
 
 // ============================================
+// MARCAR EL CAPÍTULO ACTUAL EN EL MENÚ
+// ============================================
+function markCurrentChapter() {
+    const currentChapter = parseInt(localStorage.getItem('historiaDenominacional_currentChapter') || '5');
+    const chapterBtns = document.querySelectorAll('.chapter-btn');
+    
+    chapterBtns.forEach(btn => {
+        btn.classList.remove('active');
+        const btnNumber = parseInt(btn.textContent.replace('✓', '').trim());
+        if (btnNumber === currentChapter) {
+            btn.classList.add('active');
+        }
+    });
+}
+
+// ============================================
+// FUNCIONES PARA EL MENÚ HAMBURGUESA
+// ============================================
+function toggleMenu() {
+    const sideMenu = document.getElementById('sideMenu');
+    const overlay = document.getElementById('menuOverlay');
+    const hamburger = document.getElementById('hamburgerBtn');
+    
+    if (sideMenu && overlay && hamburger) {
+        sideMenu.classList.remove('hidden');
+        overlay.classList.remove('hidden');
+        
+        sideMenu.classList.toggle('open');
+        overlay.classList.toggle('open');
+        hamburger.classList.toggle('open');
+        
+        if (!sideMenu.classList.contains('open')) {
+            setTimeout(() => {
+                if (!sideMenu.classList.contains('open')) {
+                    sideMenu.classList.add('hidden');
+                    overlay.classList.add('hidden');
+                }
+            }, 300);
+        }
+        
+        markCurrentChapter();
+    }
+}
+
+function updateMenuStats() {
+    const menuCorrect = document.getElementById('menuCorrectCount');
+    const menuIncorrect = document.getElementById('menuIncorrectCount');
+    const menuProgress = document.getElementById('menuProgress');
+    
+    if (menuCorrect) menuCorrect.textContent = correctCount;
+    if (menuIncorrect) menuIncorrect.textContent = incorrectCount;
+    
+    const total = correctCount + incorrectCount;
+    const totalQuestions = shuffledQuestions.length;
+    const progress = Math.round((total / totalQuestions) * 100) || 0;
+    
+    if (menuProgress) menuProgress.textContent = `${progress}%`;
+}
+
+// ============================================
 // INICIALIZACIÓN
 // ============================================
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('Capítulo 5 - Iniciando...');
+    
     if (!domElements.correctCount || !domElements.incorrectCount) {
         console.error('No se encontraron los elementos de contador');
         return;
     }
     
-    shuffledQuestions = shuffleArray([...questions]);
+    const savedLevel = localStorage.getItem('historiaDenominacional_level') || 'facil';
+    currentLevel = savedLevel;
+    
+    const levelQuestions = filterQuestionsByLevel(currentLevel);
+    shuffledQuestions = shuffleArray([...levelQuestions]);
+    
+    console.log(`Preguntas cargadas: ${shuffledQuestions.length} de nivel ${currentLevel}`);
+    
     currentQuestionIndex = 0;
     correctCount = 0;
     incorrectCount = 0;
     
+    const chapterNumber = localStorage.getItem('historiaDenominacional_currentChapter') || '5';
     if (domElements.chapterTitle) {
-        domElements.chapterTitle.textContent = `Capítulo 5: Expansión y Reforma (1864-1873)`;
+        domElements.chapterTitle.textContent = `Capítulo ${chapterNumber}: Expansión y Reforma - Nivel ${currentLevel}`;
     }
     
+    const allLevelBtns = document.querySelectorAll('.level-btn');
+    allLevelBtns.forEach(btn => {
+        if (btn.dataset.level === currentLevel) {
+            btn.classList.add('active');
+        }
+    });
+    
+    loadChapterSelector();
+    loadChaptersMenu();
+    markCurrentChapter();
     updateScoreDisplay();
     loadQuestion();
+});
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        const sideMenu = document.getElementById('sideMenu');
+        if (sideMenu && sideMenu.classList.contains('open')) {
+            toggleMenu();
+        }
+    }
 });
 
 window.backToMenu = backToMenu;
 window.submitAnswer = submitAnswer;
 window.nextQuestion = nextQuestion;
 window.restartChapter = restartChapter;
+window.changeLevel = changeLevel;
+window.changeLevelPrompt = changeLevelPrompt;
+window.toggleMenu = toggleMenu;
+window.goToChapter = goToChapter;
