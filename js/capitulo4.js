@@ -575,7 +575,7 @@ const questions = [
     },
 
     // ============================================
-    // NIVEL DIFÍCIL - Preguntas avanzadas (creadas para este nivel)
+    // NIVEL DIFÍCIL - Preguntas avanzadas
     // ============================================
     {
         id: 66,
@@ -623,6 +623,104 @@ const questions = [
 ];
 
 // ============================================
+// SISTEMA DE AUDIO
+// ============================================
+class AudioManager {
+    constructor() {
+        this.sounds = {};
+        this.enabled = true;
+        this.init();
+    }
+    
+    init() {
+        if (typeof window !== 'undefined') {
+            try {
+                this.createBeepSounds();
+            } catch(e) {
+                console.log('Audio no disponible:', e);
+                this.enabled = false;
+            }
+        }
+    }
+    
+    createBeepSounds() {
+        const createBeep = (frequency, duration, type = 'sine') => {
+            return () => {
+                if (!this.enabled) return;
+                try {
+                    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const oscillator = audioContext.createOscillator();
+                    const gainNode = audioContext.createGain();
+                    
+                    oscillator.connect(gainNode);
+                    gainNode.connect(audioContext.destination);
+                    
+                    oscillator.frequency.value = frequency;
+                    oscillator.type = type;
+                    
+                    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.00001, audioContext.currentTime + duration);
+                    
+                    oscillator.start();
+                    oscillator.stop(audioContext.currentTime + duration);
+                    
+                    setTimeout(() => audioContext.close(), duration * 1000);
+                } catch(e) {
+                    this.playFallbackSound(frequency);
+                }
+            };
+        };
+        
+        this.sounds = {
+            correct: createBeep(880, 0.3, 'sine'),
+            incorrect: createBeep(440, 0.5, 'sawtooth'),
+            levelUp: createBeep(523.25, 0.2, 'sine'),
+            complete: createBeep(659.25, 0.15, 'sine')
+        };
+        
+        this.sounds.complete = () => {
+            if (!this.enabled) return;
+            [523.25, 659.25, 783.99, 1046.50].forEach((freq, i) => {
+                setTimeout(() => {
+                    const beep = createBeep(freq, 0.2, 'sine');
+                    beep();
+                }, i * 150);
+            });
+        };
+    }
+    
+    playFallbackSound(frequency) {
+        try {
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.frequency.value = frequency;
+            oscillator.type = 'sine';
+            
+            gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.00001, audioContext.currentTime + 0.3);
+            
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.3);
+            
+            setTimeout(() => audioContext.close(), 400);
+        } catch(e) {}
+    }
+    
+    play(soundName) {
+        if (this.enabled && this.sounds[soundName]) {
+            this.sounds[soundName]();
+        }
+    }
+}
+
+const audioManager = new AudioManager();
+
+// ============================================
 // VARIABLES GLOBALES
 // ============================================
 let currentQuestionIndex = 0;
@@ -633,23 +731,243 @@ let incorrectCount = 0;
 let answered = false;
 let selectedOption = null;
 let selectedFillOption = null;
+let selectedOptionText = null;
 
-const chapters = [
-    { number: 1, title: 'La Iglesia Cristiana a Través de las Edades' },
-    { number: 2, title: 'Heraldos del Mensaje del Advenimiento' },
-    { number: 3, title: 'Surge la Iglesia Remanente' },
-    { number: 4, title: 'Se Organiza la Iglesia Remanente' },
-    { number: 5, title: 'Expansión y Reforma' },
-    { number: 6, title: 'Visión Mundial' },
-    { number: 7, title: 'Progreso y Pérdidas de Importancia' },
-    { number: 8, title: 'Continúa la Expansión de las Misiones' },
-    { number: 9, title: 'Progreso a Pesar de los Reveses' },
-    { number: 10, title: 'Confirmación y Expansión' },
-    { number: 11, title: 'La Terminación de la Comisión Evangélica' },
-    { number: 12, title: 'Los Departamentos de la Iglesia' },
-    { number: 13, title: 'Divisiones Mundiales de la Iglesia' }
-];
+// REQUISITO: 75% PARA DESBLOQUEAR NIVELES
+const REQUIRED_PERCENTAGE = 75;
 
+// Estado de niveles desbloqueados
+let levelUnlocked = {
+    facil: true,
+    medio: false,
+    dificil: false
+};
+
+// ============================================
+// FUNCIONES DE PROGRESO Y DESBLOQUEO
+// ============================================
+
+function getTotalQuestionsForLevel(level) {
+    return filterQuestionsByLevel(level).length;
+}
+
+function saveLevelProgress(level, correct, incorrect) {
+    try {
+        const totalQuestions = getTotalQuestionsForLevel(level);
+        const totalAnswered = correct + incorrect;
+        const percentage = totalAnswered > 0 ? Math.round((correct / totalAnswered) * 100) : 0;
+        const isCompleted = totalAnswered === totalQuestions && percentage >= REQUIRED_PERCENTAGE;
+        
+        const progress = {
+            correct: correct,
+            incorrect: incorrect,
+            totalAnswered: totalAnswered,
+            totalQuestions: totalQuestions,
+            percentage: percentage,
+            isCompleted: isCompleted,
+            lastUpdated: new Date().toISOString()
+        };
+        localStorage.setItem(`historiaDenominacional_level_${level}_progress_chapter4`, JSON.stringify(progress));
+        
+        // Si el nivel está completado, desbloquear el siguiente
+        if (isCompleted) {
+            if (level === 'facil' && !levelUnlocked.medio) {
+                levelUnlocked.medio = true;
+                saveUnlockedLevels();
+                showNotification('🎉 ¡Nivel Fácil completado! Nivel Medio desbloqueado. 🎉');
+                audioManager.play('levelUp');
+                updateLevelButtons();
+            } else if (level === 'medio' && !levelUnlocked.dificil) {
+                levelUnlocked.dificil = true;
+                saveUnlockedLevels();
+                showNotification('🏆 ¡Nivel Medio completado! Nivel Difícil desbloqueado. 🏆');
+                audioManager.play('levelUp');
+                updateLevelButtons();
+            }
+        }
+        
+        return progress;
+    } catch(e) {
+        console.log('Error guardando progreso:', e);
+        return null;
+    }
+}
+
+function loadLevelProgress(level) {
+    try {
+        const saved = localStorage.getItem(`historiaDenominacional_level_${level}_progress_chapter4`);
+        if (saved) {
+            return JSON.parse(saved);
+        }
+    } catch(e) {
+        console.log('Error cargando progreso:', e);
+    }
+    return {
+        correct: 0,
+        incorrect: 0,
+        totalAnswered: 0,
+        totalQuestions: getTotalQuestionsForLevel(level),
+        percentage: 0,
+        isCompleted: false
+    };
+}
+
+function loadUnlockedLevels() {
+    try {
+        const savedUnlocked = localStorage.getItem('historiaDenominacional_unlocked_levels_chapter4');
+        if (savedUnlocked) {
+            const unlocked = JSON.parse(savedUnlocked);
+            levelUnlocked.medio = unlocked.medio || false;
+            levelUnlocked.dificil = unlocked.dificil || false;
+        }
+        
+        // Verificar nuevamente con el progreso guardado
+        const facilProgress = loadLevelProgress('facil');
+        if (facilProgress.isCompleted) {
+            levelUnlocked.medio = true;
+        }
+        
+        const medioProgress = loadLevelProgress('medio');
+        if (medioProgress.isCompleted) {
+            levelUnlocked.dificil = true;
+        }
+        
+        saveUnlockedLevels();
+        updateLevelButtons();
+    } catch(e) {
+        console.log('Error cargando niveles desbloqueados:', e);
+    }
+}
+
+function saveUnlockedLevels() {
+    try {
+        localStorage.setItem('historiaDenominacional_unlocked_levels_chapter4', JSON.stringify({
+            medio: levelUnlocked.medio,
+            dificil: levelUnlocked.dificil
+        }));
+    } catch(e) {
+        console.log('Error guardando niveles desbloqueados:', e);
+    }
+}
+
+function updateLevelButtons() {
+    const levelBtns = document.querySelectorAll('.level-btn');
+    levelBtns.forEach(btn => {
+        const level = btn.dataset.level;
+        if (!levelUnlocked[level] && level !== currentLevel) {
+            btn.disabled = true;
+            btn.classList.add('locked');
+            btn.title = `🔒 Completa el nivel ${level === 'medio' ? 'Fácil' : 'Medio'} con ${REQUIRED_PERCENTAGE}% para desbloquear`;
+        } else {
+            btn.disabled = false;
+            btn.classList.remove('locked');
+            btn.title = '';
+        }
+    });
+}
+
+function showNotification(message) {
+    const notification = document.createElement('div');
+    notification.className = 'notification-toast';
+    notification.textContent = message;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => notification.classList.add('show'), 10);
+    
+    setTimeout(() => {
+        notification.classList.remove('show');
+        setTimeout(() => notification.remove(), 300);
+    }, 3000);
+}
+
+// ============================================
+// MODAL PARA NIVEL BLOQUEADO
+// ============================================
+function showLockedModal(targetLevel) {
+    const existingModal = document.querySelector('.modal-overlay');
+    if (existingModal) existingModal.remove();
+    
+    const modalOverlay = document.createElement('div');
+    modalOverlay.className = 'modal-overlay';
+    
+    const modalContent = document.createElement('div');
+    modalContent.className = 'modal-content';
+    
+    const requiredLevel = targetLevel === 'medio' ? 'Fácil' : 'Medio';
+    
+    // Obtener progreso del nivel requerido
+    let requiredProgress;
+    let requiredLevelProgress;
+    
+    if (targetLevel === 'medio') {
+        requiredProgress = loadLevelProgress('facil');
+        requiredLevelProgress = requiredProgress;
+    } else {
+        requiredProgress = loadLevelProgress('medio');
+        requiredLevelProgress = requiredProgress;
+    }
+    
+    const isCompleted = requiredProgress.isCompleted;
+    const currentPercent = requiredProgress.percentage;
+    const answeredQuestions = requiredProgress.totalAnswered;
+    const totalQuestions = requiredProgress.totalQuestions;
+    
+    modalContent.innerHTML = `
+        <div class="modal-icon">🔒</div>
+        <h3 class="modal-title">Nivel Bloqueado</h3>
+        <p class="modal-message">
+            Para acceder al nivel <strong>${targetLevel === 'medio' ? 'Medio' : 'Difícil'}</strong>,<br>
+            primero debes completar el nivel <strong>${requiredLevel}</strong> con al menos <strong>${REQUIRED_PERCENTAGE}%</strong> de aciertos.
+        </p>
+        <div class="modal-progress-info">
+            <div class="modal-progress-item">
+                <span class="modal-progress-label">Nivel Requerido:</span>
+                <span class="modal-progress-value">${requiredLevel}</span>
+            </div>
+            <div class="modal-progress-item">
+                <span class="modal-progress-label">Preguntas totales:</span>
+                <span class="modal-progress-value">${totalQuestions}</span>
+            </div>
+            <div class="modal-progress-item">
+                <span class="modal-progress-label">Preguntas respondidas:</span>
+                <span class="modal-progress-value">${answeredQuestions}/${totalQuestions}</span>
+            </div>
+            <div class="modal-progress-item">
+                <span class="modal-progress-label">Tu porcentaje:</span>
+                <span class="modal-progress-value ${currentPercent >= REQUIRED_PERCENTAGE ? 'success' : 'warning'}">${currentPercent}%</span>
+            </div>
+            <div class="modal-progress-item">
+                <span class="modal-progress-label">Mínimo requerido:</span>
+                <span class="modal-progress-value">${REQUIRED_PERCENTAGE}%</span>
+            </div>
+        </div>
+        <div class="modal-requirement-info">
+            <div class="requirement-icon">📚</div>
+            <p>Completa todas las ${totalQuestions} preguntas del nivel ${requiredLevel} y alcanza al menos ${REQUIRED_PERCENTAGE}% de respuestas correctas para desbloquear este nivel.</p>
+        </div>
+        <button class="modal-close-btn" id="modalCloseBtn">Entendido</button>
+    `;
+    
+    modalOverlay.appendChild(modalContent);
+    document.body.appendChild(modalOverlay);
+    
+    const closeBtn = modalContent.querySelector('#modalCloseBtn');
+    closeBtn.onclick = () => {
+        modalOverlay.classList.add('fade-out');
+        setTimeout(() => modalOverlay.remove(), 300);
+    };
+    
+    modalOverlay.onclick = (e) => {
+        if (e.target === modalOverlay) {
+            modalOverlay.classList.add('fade-out');
+            setTimeout(() => modalOverlay.remove(), 300);
+        }
+    };
+}
+
+// ============================================
+// DOM ELEMENTS
+// ============================================
 const domElements = {
     questionCounter: document.getElementById('questionCounter'),
     questionText: document.getElementById('questionText'),
@@ -687,11 +1005,15 @@ function updateScoreDisplay() {
     if (domElements.correctCount) domElements.correctCount.textContent = correctCount;
     if (domElements.incorrectCount) domElements.incorrectCount.textContent = incorrectCount;
     updateMenuStats();
+    
+    // Guardar progreso automáticamente
+    saveLevelProgress(currentLevel, correctCount, incorrectCount);
 }
 
-// ============================================
-// SELECTOR DE CAPÍTULOS
-// ============================================
+function filterQuestionsByLevel(level) {
+    return questions.filter(q => q.level === level);
+}
+
 function loadChapterSelector() {
     const selector = domElements.chapterSelector;
     if (!selector) return;
@@ -699,6 +1021,22 @@ function loadChapterSelector() {
     selector.innerHTML = '';
     const currentChapter = parseInt(localStorage.getItem('historiaDenominacional_currentChapter') || '4');
     const completedChapters = JSON.parse(localStorage.getItem('historiaDenominacional_progress') || '[]');
+    
+    const chapters = [
+        { number: 1, title: 'La Iglesia Cristiana a Través de las Edades' },
+        { number: 2, title: 'Heraldos del Mensaje del Advenimiento' },
+        { number: 3, title: 'Surge la Iglesia Remanente' },
+        { number: 4, title: 'Se Organiza la Iglesia Remanente' },
+        { number: 5, title: 'Expansión y Reforma' },
+        { number: 6, title: 'Visión Mundial' },
+        { number: 7, title: 'Progreso y Pérdidas de Importancia' },
+        { number: 8, title: 'Continúa la Expansión de las Misiones' },
+        { number: 9, title: 'Progreso a Pesar de los Reveses' },
+        { number: 10, title: 'Confirmación y Expansión' },
+        { number: 11, title: 'La Terminación de la Comisión Evangélica' },
+        { number: 12, title: 'Los Departamentos de la Iglesia' },
+        { number: 13, title: 'Divisiones Mundiales de la Iglesia' }
+    ];
     
     chapters.forEach(chapter => {
         const option = document.createElement('option');
@@ -724,12 +1062,25 @@ function loadChapterSelector() {
     });
 }
 
-// ============================================
-// CARGAR CAPÍTULOS EN EL MENÚ LATERAL
-// ============================================
 function loadChaptersMenu() {
     const chaptersGrid = document.getElementById('chaptersGrid');
     if (!chaptersGrid) return;
+    
+    const chapters = [
+        { number: 1, title: 'La Iglesia Cristiana a Través de las Edades' },
+        { number: 2, title: 'Heraldos del Mensaje del Advenimiento' },
+        { number: 3, title: 'Surge la Iglesia Remanente' },
+        { number: 4, title: 'Se Organiza la Iglesia Remanente' },
+        { number: 5, title: 'Expansión y Reforma' },
+        { number: 6, title: 'Visión Mundial' },
+        { number: 7, title: 'Progreso y Pérdidas de Importancia' },
+        { number: 8, title: 'Continúa la Expansión de las Misiones' },
+        { number: 9, title: 'Progreso a Pesar de los Reveses' },
+        { number: 10, title: 'Confirmación y Expansión' },
+        { number: 11, title: 'La Terminación de la Comisión Evangélica' },
+        { number: 12, title: 'Los Departamentos de la Iglesia' },
+        { number: 13, title: 'Divisiones Mundiales de la Iglesia' }
+    ];
     
     chaptersGrid.innerHTML = '';
     const currentChapter = parseInt(localStorage.getItem('historiaDenominacional_currentChapter') || '4');
@@ -752,9 +1103,6 @@ function loadChaptersMenu() {
     });
 }
 
-// ============================================
-// FUNCIÓN PARA CAMBIAR DE CAPÍTULO
-// ============================================
 function goToChapter(chapterNumber) {
     const currentChapter = parseInt(localStorage.getItem('historiaDenominacional_currentChapter') || '4');
     if (chapterNumber === currentChapter) {
@@ -769,12 +1117,28 @@ function goToChapter(chapterNumber) {
 }
 
 // ============================================
-// CAMBIAR NIVEL
+// CAMBIAR NIVEL CON VERIFICACIÓN ESTRICTA
 // ============================================
 function changeLevel(level) {
     if (level === currentLevel) return;
     
-    if (confirm(`¿Cambiar a nivel ${level}? Se reiniciará tu progreso actual.`)) {
+    // VERIFICACIÓN ESTRICTA - NO PERMITE CAMBIAR SI NO ESTÁ DESBLOQUEADO
+    if (!levelUnlocked[level]) {
+        showLockedModal(level);
+        audioManager.play('incorrect');
+        
+        const btn = document.querySelector(`.level-btn[data-level="${level}"]`);
+        if (btn) {
+            btn.classList.add('shake');
+            setTimeout(() => btn.classList.remove('shake'), 500);
+        }
+        return;
+    }
+    
+    if (confirm(`¿Cambiar a nivel ${level}? Se reiniciará tu progreso actual en este nivel.`)) {
+        // Guardar progreso del nivel actual antes de cambiar
+        saveLevelProgress(currentLevel, correctCount, incorrectCount);
+        
         currentLevel = level;
         localStorage.setItem('historiaDenominacional_level', level);
         
@@ -797,14 +1161,7 @@ function changeLevel(level) {
 }
 
 // ============================================
-// FILTRAR PREGUNTAS POR NIVEL
-// ============================================
-function filterQuestionsByLevel(level) {
-    return questions.filter(q => q.level === level);
-}
-
-// ============================================
-// SELECCIÓN MÚLTIPLE
+// SELECCIÓN MÚLTIPLE CON OPCIONES ALEATORIAS
 // ============================================
 function loadMultipleChoice(question) {
     const container = domElements.multipleChoiceContainer;
@@ -814,28 +1171,34 @@ function loadMultipleChoice(question) {
     
     const letters = ['A', 'B', 'C', 'D'];
     
-    question.options.forEach((option, index) => {
+    const optionsWithIndex = question.options.map((option, idx) => ({
+        text: option,
+        originalIndex: idx,
+        isCorrect: idx === question.correct
+    }));
+    
+    const shuffledOptions = shuffleArray([...optionsWithIndex]);
+    
+    shuffledOptions.forEach((option, index) => {
         const button = document.createElement('button');
         button.className = 'option-btn';
         button.setAttribute('data-letter', letters[index]);
-        button.textContent = option;
-        button.onclick = () => selectOption(index);
+        button.innerHTML = `<span class="option-letter">${letters[index]}</span><span class="option-text">${option.text}</span>`;
+        button.onclick = () => selectOption(index, option.text);
         container.appendChild(button);
     });
 }
 
-function selectOption(index) {
+function selectOption(index, optionText) {
     if (answered) return;
     
     const buttons = document.querySelectorAll('#multipleChoiceContainer .option-btn');
     buttons.forEach(btn => btn.classList.remove('selected'));
     buttons[index].classList.add('selected');
     selectedOption = index;
+    selectedOptionText = optionText;
 }
 
-// ============================================
-// COMPLETACIÓN
-// ============================================
 function loadFillInTheBlank(question) {
     const container = domElements.fillBlankContainer;
     
@@ -843,11 +1206,12 @@ function loadFillInTheBlank(question) {
     container.classList.remove('hidden');
     
     const allOptions = generateFillOptions(question);
+    const shuffledOptions = shuffleArray([...allOptions]);
     
     const fillOptionsDiv = document.createElement('div');
     fillOptionsDiv.className = 'fill-options';
     
-    allOptions.forEach((option) => {
+    shuffledOptions.forEach((option) => {
         const button = document.createElement('button');
         button.className = 'fill-option-btn';
         button.textContent = option;
@@ -884,7 +1248,7 @@ function generateFillOptions(question) {
         allOptions.push('respuesta');
     }
     
-    return shuffleArray(allOptions.slice(0, 4));
+    return allOptions.slice(0, 4);
 }
 
 function selectFillOption(button, selectedValue) {
@@ -898,9 +1262,6 @@ function selectFillOption(button, selectedValue) {
     selectedFillOption = selectedValue;
 }
 
-// ============================================
-// CARGA DE PREGUNTA
-// ============================================
 function loadQuestion() {
     const question = shuffledQuestions[currentQuestionIndex];
     
@@ -922,6 +1283,7 @@ function loadQuestion() {
     
     selectedOption = null;
     selectedFillOption = null;
+    selectedOptionText = null;
     
     if (question.type === 'multiple') {
         domElements.questionType.textContent = 'Selección Simple';
@@ -930,11 +1292,11 @@ function loadQuestion() {
         domElements.questionType.textContent = 'Completación';
         loadFillInTheBlank(question);
     }
+    
+    domElements.questionText.classList.add('fade-in');
+    setTimeout(() => domElements.questionText.classList.remove('fade-in'), 500);
 }
 
-// ============================================
-// RESPUESTA
-// ============================================
 function submitAnswer() {
     if (answered) return;
     
@@ -943,18 +1305,30 @@ function submitAnswer() {
     let message = '';
     
     if (question.type === 'multiple') {
-        if (selectedOption === null) {
+        if (selectedOption === null || selectedOptionText === null) {
             alert('Por favor selecciona una respuesta');
             return;
         }
         
-        isCorrect = selectedOption === question.correct;
         const buttons = document.querySelectorAll('#multipleChoiceContainer .option-btn');
+        const correctText = question.options[question.correct];
         
-        if (buttons[question.correct]) buttons[question.correct].classList.add('correct');
+        let correctButtonIndex = -1;
+        buttons.forEach((btn, idx) => {
+            const btnText = btn.querySelector('.option-text').textContent;
+            if (btnText === correctText) {
+                correctButtonIndex = idx;
+            }
+        });
+        
+        isCorrect = selectedOptionText === correctText;
+        
+        if (buttons[correctButtonIndex]) {
+            buttons[correctButtonIndex].classList.add('correct');
+        }
         if (!isCorrect && buttons[selectedOption]) {
             buttons[selectedOption].classList.add('incorrect');
-            message = `❌ Incorrecto. La respuesta correcta es: ${question.options[question.correct]}`;
+            message = `❌ Incorrecto. La respuesta correcta es: ${correctText}`;
         }
         
     } else if (question.type === 'fill') {
@@ -983,11 +1357,22 @@ function submitAnswer() {
     if (isCorrect) {
         correctCount++;
         message = `✅ ¡Correcto! ${question.explanation || ''}`;
+        audioManager.play('correct');
+        
+        const questionDiv = document.getElementById('questionText');
+        questionDiv.classList.add('correct-answer-pulse');
+        setTimeout(() => questionDiv.classList.remove('correct-answer-pulse'), 500);
+        
     } else {
         incorrectCount++;
         if (!message) {
             message = `❌ Incorrecto. ${question.explanation || 'Revisa el texto para aprender más.'}`;
         }
+        audioManager.play('incorrect');
+        
+        const questionDiv = document.getElementById('questionText');
+        questionDiv.classList.add('incorrect-answer-shake');
+        setTimeout(() => questionDiv.classList.remove('incorrect-answer-shake'), 500);
     }
     
     updateScoreDisplay();
@@ -1001,9 +1386,6 @@ function submitAnswer() {
     domElements.nextBtn.classList.remove('hidden');
 }
 
-// ============================================
-// SIGUIENTE PREGUNTA
-// ============================================
 function nextQuestion() {
     if (currentQuestionIndex < shuffledQuestions.length - 1) {
         currentQuestionIndex++;
@@ -1013,9 +1395,74 @@ function nextQuestion() {
     }
 }
 
-// ============================================
-// RESULTADOS FINALES
-// ============================================
+function showConfetti() {
+    const canvas = document.createElement('canvas');
+    canvas.style.position = 'fixed';
+    canvas.style.top = '0';
+    canvas.style.left = '0';
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    canvas.style.pointerEvents = 'none';
+    canvas.style.zIndex = '9999';
+    document.body.appendChild(canvas);
+    
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    
+    const particles = [];
+    const colors = ['#FFD700', '#FFC107', '#FFB347', '#FFA500', '#FF8C00'];
+    
+    for (let i = 0; i < 150; i++) {
+        particles.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height - canvas.height,
+            size: Math.random() * 8 + 4,
+            color: colors[Math.floor(Math.random() * colors.length)],
+            speedX: (Math.random() - 0.5) * 3,
+            speedY: Math.random() * 5 + 3,
+            rotation: Math.random() * 360,
+            rotationSpeed: (Math.random() - 0.5) * 10
+        });
+    }
+    
+    let animationId;
+    let startTime = Date.now();
+    
+    function animate() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        let allFallen = true;
+        
+        for (let i = 0; i < particles.length; i++) {
+            const p = particles[i];
+            p.x += p.speedX;
+            p.y += p.speedY;
+            p.rotation += p.rotationSpeed;
+            
+            if (p.y < canvas.height + 50) {
+                allFallen = false;
+            }
+            
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate(p.rotation * Math.PI / 180);
+            ctx.fillStyle = p.color;
+            ctx.fillRect(-p.size/2, -p.size/2, p.size, p.size);
+            ctx.restore();
+        }
+        
+        if (allFallen || Date.now() - startTime > 3000) {
+            cancelAnimationFrame(animationId);
+            canvas.remove();
+        } else {
+            animationId = requestAnimationFrame(animate);
+        }
+    }
+    
+    animate();
+}
+
 function showFinalResults() {
     domElements.multipleChoiceContainer.classList.add('hidden');
     domElements.fillBlankContainer.classList.add('hidden');
@@ -1025,24 +1472,40 @@ function showFinalResults() {
     
     const total = correctCount + incorrectCount;
     const percentage = Math.round((correctCount / total) * 100) || 0;
+    const totalQuestionsInLevel = shuffledQuestions.length;
+    const allQuestionsAnswered = total === totalQuestionsInLevel;
     
     let message = '';
     let levelMessage = '';
     
-    switch(currentLevel) {
-        case 'facil':
-            levelMessage = 'Nivel Fácil completado. ¡Sigue practicando!';
-            break;
-        case 'medio':
-            levelMessage = 'Nivel Medio superado. ¡Muy bien!';
-            break;
-        case 'dificil':
-            levelMessage = 'Nivel Difícil dominado. ¡Eres un experto!';
-            break;
+    // Verificar si se completó el nivel (todas las preguntas respondidas Y 75% o más)
+    const levelCompleted = allQuestionsAnswered && percentage >= REQUIRED_PERCENTAGE;
+    
+    if (levelCompleted) {
+        // Guardar progreso y desbloquear siguiente nivel
+        saveLevelProgress(currentLevel, correctCount, incorrectCount);
+        
+        if (currentLevel === 'facil') {
+            levelMessage = `✨ ¡Nivel Fácil Superado! Nivel Medio Desbloqueado ✨ (${percentage}% - Mínimo ${REQUIRED_PERCENTAGE}%)`;
+            audioManager.play('complete');
+            showConfetti();
+        } else if (currentLevel === 'medio') {
+            levelMessage = `🏆 ¡Nivel Medio Superado! Nivel Difícil Desbloqueado 🏆 (${percentage}% - Mínimo ${REQUIRED_PERCENTAGE}%)`;
+            audioManager.play('complete');
+            showConfetti();
+        } else if (currentLevel === 'dificil') {
+            levelMessage = `👑 ¡Nivel Difícil Dominado! ¡Eres un Experto en Historia! 👑 (${percentage}%)`;
+            audioManager.play('complete');
+            showConfetti();
+        }
+    } else if (allQuestionsAnswered && percentage < REQUIRED_PERCENTAGE) {
+        levelMessage = `⚠️ Necesitas ${REQUIRED_PERCENTAGE}% para desbloquear el siguiente nivel. Obtuviste ${percentage}% ⚠️`;
+    } else {
+        levelMessage = `📖 Completa todas las preguntas para desbloquear el siguiente nivel (requiere ${REQUIRED_PERCENTAGE}%)`;
     }
     
     if (percentage >= 90) message = '¡Excelente! Conoces bien la organización de la iglesia.';
-    else if (percentage >= 70) message = '¡Muy bien! Tienes un buen conocimiento.';
+    else if (percentage >= REQUIRED_PERCENTAGE) message = '¡Muy bien! Has superado el nivel.';
     else if (percentage >= 50) message = 'Bien, pero puedes repasar algunos conceptos.';
     else message = 'Sigue estudiando, la historia de la iglesia es fascinante.';
     
@@ -1086,9 +1549,6 @@ function changeLevelPrompt() {
     }
 }
 
-// ============================================
-// REINICIAR CAPÍTULO
-// ============================================
 function restartChapter() {
     const levelQuestions = filterQuestionsByLevel(currentLevel);
     shuffledQuestions = shuffleArray([...levelQuestions]);
@@ -1108,9 +1568,6 @@ function restartChapter() {
     loadQuestion();
 }
 
-// ============================================
-// COMPLETAR CAPÍTULO
-// ============================================
 function completeChapter(chapterNumber) {
     try {
         const progress = JSON.parse(localStorage.getItem('historiaDenominacional_progress') || '[]');
@@ -1123,9 +1580,6 @@ function completeChapter(chapterNumber) {
     }
 }
 
-// ============================================
-// MARCAR EL CAPÍTULO ACTUAL EN EL MENÚ
-// ============================================
 function markCurrentChapter() {
     const currentChapter = parseInt(localStorage.getItem('historiaDenominacional_currentChapter') || '4');
     const chapterBtns = document.querySelectorAll('.chapter-btn');
@@ -1139,9 +1593,6 @@ function markCurrentChapter() {
     });
 }
 
-// ============================================
-// FUNCIONES PARA EL MENÚ HAMBURGUESA
-// ============================================
 function toggleMenu() {
     const sideMenu = document.getElementById('sideMenu');
     const overlay = document.getElementById('menuOverlay');
@@ -1188,23 +1639,32 @@ function updateMenuStats() {
 // ============================================
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Capítulo 4 - Iniciando...');
+    console.log(`Requisito para desbloquear niveles: ${REQUIRED_PERCENTAGE}%`);
     
     if (!domElements.correctCount || !domElements.incorrectCount) {
         console.error('No se encontraron los elementos de contador');
         return;
     }
     
+    // Cargar niveles desbloqueados
+    loadUnlockedLevels();
+    
     const savedLevel = localStorage.getItem('historiaDenominacional_level') || 'facil';
     currentLevel = savedLevel;
+    
+    // Cargar progreso guardado del nivel actual
+    const savedProgress = loadLevelProgress(currentLevel);
+    correctCount = savedProgress.correct;
+    incorrectCount = savedProgress.incorrect;
     
     const levelQuestions = filterQuestionsByLevel(currentLevel);
     shuffledQuestions = shuffleArray([...levelQuestions]);
     
     console.log(`Preguntas cargadas: ${shuffledQuestions.length} de nivel ${currentLevel}`);
+    console.log(`Progreso cargado: ${correctCount} correctas, ${incorrectCount} incorrectas`);
+    console.log(`Niveles desbloqueados: Fácil: true, Medio: ${levelUnlocked.medio}, Difícil: ${levelUnlocked.dificil}`);
     
     currentQuestionIndex = 0;
-    correctCount = 0;
-    incorrectCount = 0;
     
     const chapterNumber = localStorage.getItem('historiaDenominacional_currentChapter') || '4';
     if (domElements.chapterTitle) {
@@ -1218,6 +1678,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
+    updateLevelButtons();
     loadChapterSelector();
     loadChaptersMenu();
     markCurrentChapter();
